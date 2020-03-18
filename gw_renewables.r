@@ -725,29 +725,29 @@ cols = c( 'red', 'navy',  rep( c('darkorange1','dodgerblue2'), 6 ) )
 ltys = c(1,1,2,2,2,2,4,4,4,4,1,1,1,1)
 lwds = c(2,2,c(rep(1,12)) )
 par(mar=c(4,4,0.5,3),oma=c(2,2,2,2))
-matplot( PWh_matx, PWh_maty,
+matplot( PWh_matx[,c(1,2,11,12,13,14)], PWh_maty[,c(1,2,11,12,13,14)],
 	type = 'l', 
 	xlim = c(0,250),
 	ylim = c(0,40),
 	xlab = 'Levelized Cost of Energy [ USD / MWh ]', 
 	ylab = 'Renewable Energy Potential [ PWh / yr ]', 
-	lty = ltys,
-	col = cols,	
-	lwd = lwds,
+	col = c( 'red', 'navy',  'darkorange1','dodgerblue2',  'darkorange1','dodgerblue2' ), 
+	lty = c(1,1,1,1,1,1),
+	lwd = c(2,2,1,1,1,1),
 	xaxs = 'i' ,
 	yaxs = 'i',
 	bty = 'n'
 	)
 text( 10, 37, 'a', cex = 1.3, font = 2 )	
 matplot( 	
-	km3_matx, km3_maty, type = 'l', 
+	km3_matx[,c(1,2,11,12,13,14)], km3_maty[,c(1,2,11,12,13,14)], type = 'l', 
 	xlim = c(0,600),
 	ylim = c(0, 160),
 	xlab = 'CO2 Mitigation Cost [ USD / tCO2 ]', 
 	ylab = 'Nonrenewable Groundwater Extraction [ km3 / yr ]', 
-	lty = ltys, 
-	col = cols,
-	lwd = lwds,
+	col = c( 'red', 'navy',  'darkorange1','dodgerblue2',  'darkorange1','dodgerblue2' ), 
+	lty = c(1,1,1,1,1,1),
+	lwd = c(2,2,1,1,1,1),
 	xaxs = 'i' ,
 	yaxs = 'i',
 	bty = 'n'
@@ -760,15 +760,11 @@ legend(
 	legend = c(
 		'Solar: Average',
 		'Wind: Average',
-		'Solar: Min/Max Cost',
-		'Wind: Min/Max Cost', 
-		'Solar: Min/Max Perf',
-		'Wind: Min/Max Perf',
 		'Solar: Worst/Best',
 		'Wind: Worst/Best'	), 
-	col = c( 'red', 'navy',  rep( c('darkorange1','dodgerblue2'), 3 ) ), 
-	lty = c(1,1,2,2,4,4,1,1),
-	lwd = c(2,2,1,1,1,1,1,1), bty = 'n', ncol =1, cex = 1, y.intersp = 1.7 ) 		
+	col = c( 'red', 'navy',  'darkorange1','dodgerblue2',  'darkorange1','dodgerblue2' ), 
+	lty = c(1,1,1,1,1,1),
+	lwd = c(2,2,1,1,1,1), bty = 'n', ncol =1, cex = 1, y.intersp = 1.7 ) 		
 dev.off()
 
 # barplots showing the max potential for solar / wind as well as change in production of crops
@@ -779,6 +775,40 @@ cwr.df = gwr.df %>%
 	ungroup() %>% data.frame() %>%
 	arrange(gw_cons_mcm)
 	
+cwc.df = gwr.df %>% 
+	dplyr::select( iso, EF_final, names(gwr.df)[grepl( 'solar_LCOE|solar_energy_MWh_yr', names(gwr.df) )] ) 
+cwc.df = bind_rows( lapply( unique(cwc.df$iso), function( ccc ){
+	df = cwc.df %>% filter( iso == ccc ) 
+	res1 = bind_rows( lapply( c( 'avg', 'min', 'max'), function( rng1 ){ 
+		bind_rows( lapply( c( 'avg', 'min', 'max'), function( rng2 ){
+			lcoe = df %>% dplyr::select( paste( 'solar_LCOE', rng1, rng2, sep = '.' ) )
+			en = df %>% dplyr::select( paste( 'solar_energy_MWh_yr', rng1, rng2, sep = '.' ) )
+			ef = df %>% dplyr::select( EF_final )
+			cst = weighted.mean( c( lcoe / ef ), en ) 
+			return( data.frame( iso = ccc, rng1 = rng1, rng2 = rng2, cst = cst ) )
+			} ) )
+		} ) )
+	return(res1)
+	} ) ) 
+cwc.df = left_join(
+	cwc.df %>% 
+		filter( rng1 == 'avg', rng2 == 'avg' ) %>% 
+		dplyr::select( iso, cst ),
+	cwc.df %>%
+	group_by( iso ) %>% summarise( 
+		mitigation_cost = paste0( 
+			'(' ,
+			round( 	min( cst ) ),
+			',',
+			round( 	max( cst ) ),
+			')'
+			) ) %>%
+	ungroup() %>% data.frame() ,		
+	by = 'iso' ) %>%
+	mutate( mitigation_cost = paste( round(cst), mitigation_cost, sep = ' ' ) ) %>%
+	dplyr::select( iso, mitigation_cost )	
+		
+		
 tbl1 = data.frame( do.call( cbind, lapply( c('solar_energy', 'wind_energy' ), function( ttt ){
 	do.call( rbind, lapply( unique( cwr.df$iso ), function( ccc ){
 		df = cwr.df[, grepl( paste0('iso|',ttt), names(cwr.df) )] %>% 
@@ -862,10 +892,14 @@ tbl2 = do.call( rbind, lapply( tbl1$Country, function( ccc ){
 		} ) ) 
 	} ) )%>%
 	pivot_wider( names_from = 'crop', values_from = 'change') %>%
-	ungroup() %>% data.frame()
+	ungroup() %>% data.frame	
 tbl = left_join( tbl1, tbl2, by = 'Country' ) %>%
 	mutate( Country = countrycode(Country,'iso3c','country.name'))
-write.csv( tbl, 'country_res.csv')	
+tbl2 = left_join( tbl, 
+	cwc.df %>% 
+		rename( Country = iso ) %>%
+		mutate( Country = countrycode(Country,'iso3c','country.name')), by = 'Country' )	
+write.csv( tbl2, 'country_res2.csv')	
 	
 	
 	
